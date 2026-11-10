@@ -8,6 +8,9 @@ tripwire.db
 docs/demo_run.txt
 .pytest_cache/
 .coverage
-dist/
-build/
+/dist/
+/build/
 *.log
+
+# Video compositor scratch (keep the final mp4 and sample frames)
+video/build/work/

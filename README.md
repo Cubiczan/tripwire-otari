@@ -28,7 +28,7 @@ This is the Otari edition of [Tripwire](https://github.com/Cubiczan/tripwire). T
 
 ## Status, honestly
 
-A live run against hosted Otari.ai succeeded on 10 Nov 2026, 9:53 AM America/New_York (see [docs/demo_run_live.txt](docs/demo_run_live.txt)). Analyst chats go through the `tripwire-analyst` Fallback policy (primary `xiaomi/mimo-v2.6-flash`, backup `z-ai/glm-5.3-flash`). The verifier is `z-ai/glm-5.3-flash`. The demo also made one official-page web fetch (`https://ofac.treasury.gov/` on the blocked-country invoice) and one code-execution call, and it printed the `tripwire-otari` key's $1.00 monthly budget from `GET /key/budget`. Cumulative usage after that run was **$0.072451**; the monthly ceiling showed **$0.030457 used / $1.00**. Chat tokens were a small fraction of a cent. The $2.00 welcome credit was not close to being used up.
+A live run against hosted Otari.ai succeeded on 10 Nov 2026, 10:01 AM America/New_York (see [docs/demo_run_live.txt](docs/demo_run_live.txt)). Analyst chats go through the `tripwire-analyst` Fallback policy (primary `xiaomi/mimo-v2.6-flash`, backup `z-ai/glm-5.3-flash`). The verifier is `z-ai/glm-5.3-flash`. The demo also made one official-page web fetch (`https://ofac.treasury.gov/` on the blocked-country invoice) and one code-execution call, and it printed the `tripwire-otari` key's $1.00 monthly budget from `GET /key/budget`. Cumulative usage after that run was **$0.092858**; the monthly ceiling showed **$0.050864 used / $1.00**. Chat tokens were a small fraction of a cent. The $2.00 welcome credit was not close to being used up.
 
 Without `OTARI_API_KEY`, or with `OTARI_MODE=mock`, the app still runs a clearly labeled mock of the same request shapes. The dashboard banner says MOCK MODE in that case.
 

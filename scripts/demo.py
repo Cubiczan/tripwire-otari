@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -205,6 +206,20 @@ def main() -> int:
     target = OUT_LIVE if settings["mode"] == "live" else OUT_MOCK
     target.write_text(text)
     print(f"\nWrote {target}")
+
+    dump = os.environ.get("TRIPWIRE_DUMP_JSON")
+    if dump:
+        payload = {
+            "results": [r.to_public_dict() for r in results],
+            "holds": [h.__dict__ for h in gate.holds.values()],
+            "audit_ok": ok,
+            "audit_entries": len(gate.audit.entries()),
+        }
+        dump_text = _scrub(json.dumps(payload, indent=2, default=str))
+        Path(dump).parent.mkdir(parents=True, exist_ok=True)
+        Path(dump).write_text(dump_text + "\n")
+        print(f"Wrote {dump}")
+
     return 0 if ok and not hard_fail else 1
 
 

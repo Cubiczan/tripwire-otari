@@ -1,5 +1,7 @@
 # Demo video script (3–5 minutes) and shot list
 
+A silent 1080p screen-and-caption cut is ready at [video/tripwire-otari-demo.mp4](video/tripwire-otari-demo.mp4) (3:33, no AI voice or imagery) for you to add your own voiceover and upload.
+
 **You have to record this.** The official rules say the demo video and any feedback video cannot use AI. It must be a screen recording with your voice, showing the project.
 
 Record against a **live** Otari.ai run (`OTARI_MODE=live python scripts/demo.py`, then the dashboard at http://127.0.0.1:8000). The latest live log is `docs/demo_run_live.txt` (10 Nov 2026, 9:53 AM America/New_York). If you change the Otari dashboard again, rerun first and narrate whatever actually changed.

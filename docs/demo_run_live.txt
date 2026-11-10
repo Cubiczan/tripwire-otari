@@ -2,9 +2,9 @@ Tripwire for Otari — sample-data demo
 Otari mode: LIVE
 Hosted endpoint: https://api.otari.ai/api/v1
 Workspace token is set and is not printed.
-Usage after this run: cost=$0.072451  requests=60  errors=8  tokens=14056 (prompt=10324, completion=3732)
-Key budget (GET /key/budget): limit=$1.00  used=$0.030457  remaining=$0.969543  exhausted=False  source=key/budget  resets_at=2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York)
-  limits: [{"scope": "api_token", "limit_usd": 1.0, "used_usd": 0.030457, "remaining_usd": 0.969543, "resets_at": "2026-12-01T00:00:00Z"}]
+Usage after this run: cost=$0.092858  requests=72  errors=8  tokens=17301 (prompt=12967, completion=4334)
+Key budget (GET /key/budget): limit=$1.00  used=$0.050864  remaining=$0.949136  exhausted=False  source=key/budget  resets_at=2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York)
+  limits: [{"scope": "api_token", "limit_usd": 1.0, "used_usd": 0.050864, "remaining_usd": 0.949136, "resets_at": "2026-12-01T00:00:00Z"}]
 Analyst model:  xiaomi/mimo-v2.6-flash
 Verifier model: z-ai/glm-5.3-flash
 Routing policy: tripwire-analyst
@@ -63,33 +63,33 @@ Usage by model (from Otari, redacted):
   {
     "key": "code_execution",
     "label": null,
-    "cost": 0.05,
+    "cost": 0.06,
     "tokens": 0,
-    "requests": 5,
+    "requests": 6,
     "is_other": false
   },
   {
     "key": "builtin_fetch",
     "label": null,
-    "cost": 0.02,
+    "cost": 0.03,
     "tokens": 0,
-    "requests": 3,
+    "requests": 4,
     "is_other": false
   },
   {
     "key": "zai-org/GLM-5.3-Flash",
     "label": null,
-    "cost": 0.001393,
-    "tokens": 5478,
-    "requests": 22,
+    "cost": 0.001695,
+    "tokens": 6798,
+    "requests": 27,
     "is_other": false
   },
   {
     "key": "XiaomiMiMo/MiMo-V2.6-Flash",
     "label": null,
-    "cost": 0.001058,
-    "tokens": 8578,
-    "requests": 23,
+    "cost": 0.001163,
+    "tokens": 10503,
+    "requests": 28,
     "is_other": false
   },
   {
@@ -121,11 +121,11 @@ Usage by tool:
 [
   {
     "tool": "code_execution",
-    "calls": 5,
+    "calls": 6,
     "errors": 0,
-    "requests": 5,
-    "cost": 0.05
+    "requests": 6,
+    "cost": 0.060000000000000005
   }
 ]
 
-Finished at 2026-11-10 09:53 EST
+Finished at 2026-11-10 10:01 EST

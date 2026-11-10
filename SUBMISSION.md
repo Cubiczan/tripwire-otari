@@ -43,7 +43,7 @@ The sample desk is a small wholesale distributor: packaging, grocery wholesale, 
 - Two open-weight models in distinct roles, selectors confirmed with `GET /api/v1/models`:
   - Analyst / screener: `xiaomi/mimo-v2.6-flash` (catalog $0.14 / $0.28 per million tokens, tools supported). Served by DeepInfra as `XiaomiMiMo/MiMo-V2.6-Flash`.
   - Tighten-only verifier: `z-ai/glm-5.3-flash` (catalog $0.15 / $0.50 per million, tools supported). Served as `zai-org/GLM-5.3-Flash`.
-- Analyst chats go through the dashboard Fallback policy `tripwire-analyst` (main `xiaomi/mimo-v2.6-flash`, backup `z-ai/glm-5.3-flash`). The client still retries on the named analyst model if the policy request fails. On the 10 Nov 2026 9:53 AM America/New_York run, Otari served the primary model (`Otari-Fallback: false`).
+- Analyst chats go through the dashboard Fallback policy `tripwire-analyst` (main `xiaomi/mimo-v2.6-flash`, backup `z-ai/glm-5.3-flash`). The client still retries on the named analyst model if the policy request fails. On the 10 Nov 2026 10:01 AM America/New_York run, Otari served the primary model (`Otari-Fallback: false`).
 - Code execution via `POST /api/v1/code/execute` to re-sum the routine invoice lines (live, billed at $0.01 per call; used once per demo).
 - Web fetch via `POST /api/v1/fetch` once on `deny_country`, against `https://ofac.treasury.gov/`, to corroborate that North Korea is an OFAC sanctions program (also billed at $0.01). Page content is treated as untrusted evidence. Direct `POST /search` still returns 400 because no search tool/provider is configured, even though `GET /tools` lists `otari_web_search` as available.
 - `GET /api/v1/key/budget` is read and printed in the demo: $1.00 USD monthly `api_token` limit, used and remaining, reset at 2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York).
@@ -51,7 +51,7 @@ The sample desk is a small wholesale distributor: packaging, grocery wholesale, 
 
 ### Otari features used (rubric list, honest)
 
-Used live on 10 Nov 2026, 9:53 AM America/New_York:
+Used live on 10 Nov 2026, 10:01 AM America/New_York:
 
 - Open-weight models (analyst + verifier)
 - Multiple models serving distinct roles
@@ -68,9 +68,9 @@ Not claimed as live Otari features:
 - Per-user / second-key budgets: the $1.00 ceiling is on the single `tripwire-otari` key (`api_token` scope), not a west-agent key, so `budget_exhausted` stays a documented soft gap.
 - `Otari-Fallback: true` was not observed; the policy's primary model served every analyst call.
 
-### Live run (10 Nov 2026, 9:53 AM America/New_York)
+### Live run (10 Nov 2026, 10:01 AM America/New_York)
 
-Log: `docs/demo_run_live.txt`. Tests: 14 passed. Cumulative usage on the `tripwire-otari` key after this run: **$0.072451** (60 requests, 8 errors, 14,056 tokens). The key's monthly ceiling showed **used $0.030457 / $1.00**, remaining **$0.969543**, reset 2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York). Almost all spend is tool calls at $0.01 each (code execution and web fetch); the two chat models together were a couple of tenths of a cent. This dashboard-wiring demo added about **$0.020** on top of earlier smoke and demo calls. Still well under the $0.25 target and the $2.00 welcome credit.
+Log: `docs/demo_run_live.txt`. Tests: 14 passed. Cumulative usage on the `tripwire-otari` key after this run: **$0.092858** (72 requests, 8 errors, 17,301 tokens). The key's monthly ceiling showed **used $0.050864 / $1.00**, remaining **$0.949136**, reset 2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York). Almost all spend is tool calls at $0.01 each (code execution and web fetch); the two chat models together were a couple of tenths of a cent. The video-capture rerun on 10 Nov 2026 at 10:01 AM America/New_York added about **$0.020** (one code-execution call and one OFAC fetch, plus a fraction of a cent in chat), still under the $0.05 capture budget. Still well under the $0.25 target and the $2.00 welcome credit.
 
 Hard scenario expectations all matched: routine allow, hold over threshold, blocked-country deny (with OFAC corroboration), over-cap deny, line-total hold, unknown-vendor hold, and the routing-policy path allow. Two scenarios remain soft: `budget_exhausted` (no second/west key budget; the $1.00 ceiling is not exhausted) and `guardrail_block` (no Otari catalog guardrail).
 
@@ -95,11 +95,11 @@ https://github.com/Cubiczan/tripwire-otari (not created yet — see checklist)
 
 Branch: `devs-wilding`
 
-First Otari commit: paste the commit URL after the branch is pushed. In this checkout the opening commit on `devs-wilding` is the Otari integration.
+First Otari commit (opening commit on `devs-wilding`, where the Otari integration landed): https://github.com/Cubiczan/tripwire-otari/commit/121db2d06617c267eb3b8c9c34ccce6b47cb28d2
 
 ### Demo video
 
-Paste the YouTube (or other public) URL after you record and upload it. Follow [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). The recording must be your screen and your voice. Do not use an AI voice or an AI-generated video.
+A silent 1080p screen-and-caption cut is at [video/tripwire-otari-demo.mp4](video/tripwire-otari-demo.mp4) for you to add your own voiceover and upload. Follow [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). The official recording must be your screen and your voice. Do not use an AI voice or an AI-generated video. Paste the public YouTube (or other public) URL here after you upload it.
 
 ### Issues / PRs on mozilla-ai/otari
 
@@ -125,7 +125,7 @@ Submitting Tripwire for Developers Wilding: Online.
 
 2. Public repo: https://github.com/Cubiczan/tripwire-otari
    Hackathon branch: devs-wilding
-   First commit where Otari came in: [ADD COMMIT URL]
+   First commit where Otari came in: https://github.com/Cubiczan/tripwire-otari/commit/121db2d06617c267eb3b8c9c34ccce6b47cb28d2
 
 3. Otari features used: open-weight analyst and verifier models in distinct roles; the tripwire-analyst Fallback routing policy (client retry kept as a backstop); in-process MCP books tools; web fetch of the official OFAC page on the blocked-country invoice (web search is not configured yet); code execution; the tripwire-otari $1.00 monthly key budget, read back from /key/budget. Otari catalog guardrails were not enabled; Tripwire's own policy gate is the guardrail layer. Per-user / second-key budgets are not attached.
 
@@ -161,7 +161,7 @@ Nothing below has been done for you.
 1. **Confirm registration.** You are on DoraHacks as Sam Desigan. If the email to marcus+wilding@mozilla.org was never sent, approve a short sign-up email first.
 2. **Otari.ai account.** Sign up at https://otari.ai/dashboard/#/signup if you do not already have an account (first 200 sign-ups receive $20 in tokens, if that offer is still open). Join the Mozilla OSAI Discord and grant the `devs-wilding` role. Star https://github.com/mozilla-ai/otari.
 3. **Optional remaining dashboard work** listed above if you want search, a vendor guardrail, a west-agent key budget, or hosted MCP. Do not add a vendor guardrail key unless you are comfortable with that vendor. Tokens stay in `.env` only, never in chat.
-4. **Live demo (already rerun after the dashboard changes).** The latest successful `OTARI_MODE=live python scripts/demo.py` is in `docs/demo_run_live.txt` (10 Nov 2026, 9:53 AM America/New_York). For the video, record against a live run, not the mock. Confirm the same requests on the Otari Overview.
+4. **Live demo (already rerun after the dashboard changes).** The latest successful `OTARI_MODE=live python scripts/demo.py` is in `docs/demo_run_live.txt` (10 Nov 2026, 10:01 AM America/New_York). For the video, record against a live run, not the mock. Confirm the same requests on the Otari Overview.
 5. **Approve and publish the repo** under Cubiczan (not icohangar-ops), public, branch `devs-wilding`. After the push, paste the first Otari commit URL into this file. I will not create or push the GitHub repo until you say so.
 6. **Record the demo video yourself** (3–5 minutes, your screen, your voice, no AI). Shot list: [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). Upload it, then paste the link.
 7. **Feedback.** Record a second 3–5 minute feedback video and/or finalize [FEEDBACK_DRAFT.md](FEEDBACK_DRAFT.md) in your own words after the live run.

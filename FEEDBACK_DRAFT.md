@@ -2,7 +2,7 @@
 
 The official form accepts a 3–5 minute feedback screen recording, written answers, or both. The recording, if you make one, must be your screen and your voice — no AI.
 
-These answers are based on the live hosted runs on 10 Nov 2026 (US region, Default workspace, latest log `docs/demo_run_live.txt` at 9:53 AM America/New_York). Rewrite them in your own words before you send them.
+These answers are based on the live hosted runs on 10 Nov 2026 (US region, Default workspace, latest log `docs/demo_run_live.txt` at 10:01 AM America/New_York). Rewrite them in your own words before you send them.
 
 ## Feedback video, if you record one (3–5 min)
 
@@ -39,6 +39,6 @@ Yes, for this use case, with a caveat. One OpenAI-compatible endpoint, two cheap
 - Routing: policy used live; primary served (`Otari-Fallback: false`); client retry kept as a backstop
 - Web fetch: one live call to `https://ofac.treasury.gov/` on `deny_country` (North Korea program corroborated). Web search is not configured.
 - Guardrails: Otari catalog skipped (outside vendor key required). Tripwire's policy gate is the guardrail layer.
-- Budget: `tripwire-otari` $1.00 monthly `api_token` limit, read from `/key/budget`. After the 9:53 AM America/New_York run: used $0.030457, remaining $0.969543, resets 2026-12-01T00:00:00Z (2026-11-30 19:00 EST). No second/west key.
-- Live demo: 10 Nov 2026, 9:53 AM America/New_York, `docs/demo_run_live.txt`. Tests: 14 passed. Cumulative `/key/usage/summary` cost $0.072451.
+- Budget: `tripwire-otari` $1.00 monthly `api_token` limit, read from `/key/budget`. After the 10:01 AM America/New_York run: used $0.050864, remaining $0.949136, resets 2026-12-01T00:00:00Z (2026-11-30 19:00 EST). No second/west key.
+- Live demo: 10 Nov 2026, 10:01 AM America/New_York, `docs/demo_run_live.txt`. Tests: 14 passed. Cumulative `/key/usage/summary` cost $0.092858.
 - Do not claim live web search, mandated Otari catalog guardrails, a fired `Otari-Fallback` header, or a per-user budget refusal unless those are enabled and rerun.
