@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tripwire for Otari</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a222c;
+      --ink: #e8eef4;
+      --muted: #93a0ae;
+      --line: #2a3542;
+      --allow: #3dba8b;
+      --hold: #e3b341;
+      --deny: #e05c5c;
+      --accent: #6ea8ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "IBM Plex Sans", "Source Sans 3", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      padding: 20px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; font-weight: 620; }
+    .sub { color: var(--muted); margin: 0; }
+    .banner {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+    .banner.mock { background: #3a2a10; color: #f3d089; }
+    .banner.live { background: #123528; color: #9de7c5; }
+    main { padding: 20px 28px 48px; display: grid; gap: 20px; }
+    .row { display: grid; gap: 16px; grid-template-columns: 1fr; }
+    @media (min-width: 960px) { .row.two { grid-template-columns: 2fr 1fr; } }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    h2 { font-size: 15px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    button {
+      background: var(--accent);
+      color: #081018;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button.secondary { background: #2b3848; color: var(--ink); }
+    button.danger { background: #6e2b2b; color: #ffd9d9; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; }
+    .allow { background: #163c30; color: var(--allow); }
+    .hold { background: #3a3110; color: var(--hold); }
+    .deny { background: #3c1818; color: var(--deny); }
+    ul.features { margin: 0; padding: 0; list-style: none; }
+    ul.features li { padding: 4px 0; }
+    .yes { color: var(--allow); }
+    .no { color: var(--muted); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    pre { white-space: pre-wrap; color: var(--muted); font-size: 12px; margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Tripwire for Otari</h1>
+      <p class="sub">Every agent action is screened and logged through Otari before it can spend money or touch live systems.</p>
+    </div>
+    <div id="banner" class="banner mock">Checking Otari mode…</div>
+  </header>
+  <main>
+    <div class="actions">
+      <button id="runAll">Run all sample scenarios</button>
+      <button class="secondary" id="verify">Verify audit chain</button>
+    </div>
+    <div class="row two">
+      <section class="card">
+        <h2>Decisions</h2>
+        <div id="decisions">Run the sample scenarios to populate this table.</div>
+      </section>
+      <section class="card">
+        <h2>Otari features in this run</h2>
+        <ul class="features" id="features"></ul>
+        <p class="sub" id="auditLine"></p>
+      </section>
+    </div>
+    <div class="row two">
+      <section class="card">
+        <h2>Open holds</h2>
+        <div id="holds">None yet.</div>
+      </section>
+      <section class="card">
+        <h2>Gateway</h2>
+        <pre id="status"></pre>
+      </section>
+    </div>
+  </main>
+  <script>
+    const FEATURES = [
+      ["open_weight_analyst", "Open-weight analyst model"],
+      ["open_weight_verifier", "Open-weight verifier model"],
+      ["multiple_models", "Multiple models, distinct roles"],
+      ["routing_fallback", "Model routing / fallback"],
+      ["mcp", "MCP books tools"],
+      ["web_search", "Web search"],
+      ["web_fetch", "Web fetch"],
+      ["code_execution", "Code execution"],
+      ["budgets", "Budgets and spending limits"],
+      ["per_user_budgets", "Per-user budgets"],
+      ["guardrails", "Guardrails"],
+    ];
+
+    const $ = (id) => document.getElementById(id);
+
+    function pill(decision) {
+      return `<span class="pill ${decision}">${decision}</span>`;
+    }
+
+    async function refreshStatus() {
+      const s = await (await fetch("/api/status")).json();
+      const banner = $("banner");
+      if (s.mock_banner) {
+        banner.className = "banner mock";
+        banner.textContent = "MOCK MODE — not calling hosted otari.ai";
+      } else {
+        banner.className = "banner live";
+        banner.textContent = "LIVE — requests go to " + s.base_url;
+      }
+      $("status").textContent = JSON.stringify({
+        mode: s.otari_mode,
+        has_key: s.has_key,
+        has_key_west: s.has_key_west,
+        models: s.models,
+        guardrail_profile: s.guardrail_profile,
+        decisions: s.decisions,
+        open_holds: s.open_holds,
+        audit_ok: s.audit_ok,
+      }, null, 2);
+    }
+
+    function renderResults(results) {
+      if (!results.length) {
+        $("decisions").textContent = "No decisions yet.";
+        return;
+      }
+      const rows = results.map(r => `
+        <tr>
+          <td>${r.scenario_id}<br><span class="sub">${r.title || ""}</span></td>
+          <td>${pill(r.decision)}</td>
+          <td>${(r.reasons || []).join(", ")}</td>
+          <td>${r.agent_id}</td>
+        </tr>`).join("");
+      $("decisions").innerHTML = `<table><thead><tr><th>Scenario</th><th>Decision</th><th>Reasons</th><th>Agent</th></tr></thead><tbody>${rows}</tbody></table>`;
+      const used = new Set();
+      results.forEach(r => (r.features || []).forEach(f => used.add(f)));
+      $("features").innerHTML = FEATURES.map(([key, label]) =>
+        `<li class="${used.has(key) ? "yes" : "no"}">${used.has(key) ? "yes" : "no"} — ${label}</li>`
+      ).join("");
+    }
+
+    function renderHolds(holds) {
+      const open = (holds || []).filter(h => h.status === "open");
+      if (!open.length) { $("holds").textContent = "None open."; return; }
+      $("holds").innerHTML = open.map(h => `
+        <div style="margin-bottom:10px">
+          <strong>${h.id}</strong> ${JSON.stringify(h.action)}
+          <div class="actions">
+            <button data-approve="${h.id}">Approve</button>
+            <button class="danger" data-deny="${h.id}">Deny</button>
+          </div>
+          <div class="sub">Approval records intent only. No payment rail is connected.</div>
+        </div>`).join("");
+    }
+
+    async function loadDecisions() {
+      const data = await (await fetch("/api/decisions")).json();
+      renderResults(data.results || []);
+      const holds = await (await fetch("/api/holds")).json();
+      renderHolds(holds.holds || []);
+    }
+
+    $("runAll").addEventListener("click", async () => {
+      $("runAll").disabled = true;
+      try {
+        const data = await (await fetch("/api/run-all", { method: "POST" })).json();
+        renderResults(data.results || []);
+        $("auditLine").textContent = data.audit_ok ? "Audit chain OK." : "Audit chain BROKEN.";
+        await refreshStatus();
+        const holds = await (await fetch("/api/holds")).json();
+        renderHolds(holds.holds || []);
+      } finally {
+        $("runAll").disabled = false;
+      }
+    });
+
+    $("verify").addEventListener("click", async () => {
+      const data = await (await fetch("/api/audit/verify")).json();
+      $("auditLine").textContent = data.ok
+        ? `Audit chain OK (${data.entries} events).`
+        : `Audit chain BROKEN at ${data.broken_at}.`;
+    });
+
+    document.body.addEventListener("click", async (ev) => {
+      const approve = ev.target.dataset && ev.target.dataset.approve;
+      const deny = ev.target.dataset && ev.target.dataset.deny;
+      if (approve) await fetch(`/api/holds/${approve}/approve`, { method: "POST" });
+      if (deny) await fetch(`/api/holds/${deny}/deny`, { method: "POST" });
+      if (approve || deny) {
+        const holds = await (await fetch("/api/holds")).json();
+        renderHolds(holds.holds || []);
+      }
+    });
+
+    refreshStatus().then(loadDecisions);
+  </script>
+</body>
+</html>

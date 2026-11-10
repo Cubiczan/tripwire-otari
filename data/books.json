@@ -1,0 +1,59 @@
+{
+  "vendors": [
+    {
+      "id": "northline-packaging",
+      "name": "Northline Packaging",
+      "country": "US",
+      "category": "corrugated cartons",
+      "website": "https://example.com/northline-packaging",
+      "status": "active"
+    },
+    {
+      "id": "harbor-wholesale",
+      "name": "Harbor Wholesale",
+      "country": "US",
+      "category": "grocery wholesale",
+      "website": "https://example.com/harbor-wholesale",
+      "status": "active"
+    },
+    {
+      "id": "ridgeway-logistics",
+      "name": "Ridgeway Logistics",
+      "country": "US",
+      "category": "freight",
+      "website": "https://example.com/ridgeway-logistics",
+      "status": "active"
+    },
+    {
+      "id": "sutton-fixtures",
+      "name": "Sutton Fixtures",
+      "country": "US",
+      "category": "store fixtures",
+      "website": "https://example.com/sutton-fixtures",
+      "status": "active"
+    }
+  ],
+  "open_bills": [
+    {
+      "id": "bill-4401",
+      "vendor_id": "northline-packaging",
+      "amount": 185.0,
+      "currency": "USD",
+      "memo": "Monthly carton restock"
+    },
+    {
+      "id": "bill-4408",
+      "vendor_id": "sutton-fixtures",
+      "amount": 2400.0,
+      "currency": "USD",
+      "memo": "Aisle end-cap refresh"
+    },
+    {
+      "id": "bill-4412",
+      "vendor_id": "harbor-wholesale",
+      "amount": 400.0,
+      "currency": "USD",
+      "memo": "Dry-goods pallet"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+Tripwire for Otari — sample-data demo
+Otari mode: MOCK
+This run is MOCK. It did not call hosted otari.ai.
+Set OTARI_API_KEY (otk_…) and OTARI_MODE=live to use the hosted gateway.
+Analyst model:  deepseek/deepseek-v4-pro-0813
+Verifier model: mistral/mistral-large-4
+Routing policy: tripwire-analyst
+
+Scenario                 Decision Expect   Match  Reasons
+---------------------------------------------------------
+allow_routine            allow    allow    yes    ok
+hold_over_threshold      hold     hold     yes    over_hold_threshold
+deny_country             deny     deny     yes    unknown_vendor, payee_not_allowlisted, country_not_allowed
+deny_over_max            deny     deny     yes    no_open_bill, over_max_single, velocity_total
+line_total_mismatch      hold     hold     yes    bill_amount_mismatch, line_total_mismatch, analyst_hold, verifier_hold
+unknown_vendor           hold     hold     yes    unknown_vendor, payee_not_allowlisted
+budget_exhausted         deny     deny     yes    otari_budget_exhausted
+guardrail_block          deny     deny     yes    otari_guardrail_violation
+fallback_routing         allow    allow    yes    ok
+
+Audit chain: OK (9 events)
+
+Otari features exercised in this run:
+  [yes] Open-weight analyst model
+  [yes] Open-weight verifier model
+  [yes] Multiple models, distinct roles
+  [yes] Model routing / fallback
+  [yes] MCP books tools
+  [yes] Web search
+  [yes] Web fetch
+  [yes] Code execution
+  [yes] Budgets and spending limits
+  [yes] Per-user budgets
+  [yes] Guardrails
+
+Honesty notes:
+- No payment rail is connected. ALLOW records intent; it does not move money.
+- Sample vendors, bills, and search hits are invented for the demo.
+- MOCK mode implements the documented Otari request shapes locally.
+  Prize eligibility requires a live Otari.ai run and a public repo.
+
+Finished at 2026-11-10 09:25 EST
