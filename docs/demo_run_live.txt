@@ -1,0 +1,126 @@
+Tripwire for Otari — sample-data demo
+Otari mode: LIVE
+Hosted endpoint: https://api.otari.ai/api/v1
+Workspace token is set and is not printed.
+Usage after this run: cost=$0.041994  requests=45  errors=7  tokens=10652 (prompt=7633, completion=3019)
+Analyst model:  xiaomi/mimo-v2.6-flash
+Verifier model: z-ai/glm-5.3-flash
+Routing policy: tripwire-analyst
+
+Scenario                 Decision Expect   Match  Reasons
+---------------------------------------------------------
+allow_routine            allow    allow    yes    ok
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=allow
+hold_over_threshold      hold     hold     yes    over_hold_threshold, verifier_hold
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=hold
+deny_country             deny     deny     yes    unknown_vendor, payee_not_allowlisted, country_not_allowed
+deny_over_max            deny     deny     yes    no_open_bill, over_max_single, velocity_total
+line_total_mismatch      hold     hold     yes    bill_amount_mismatch, line_total_mismatch, analyst_hold, verifier_hold
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
+unknown_vendor           hold     hold     yes    unknown_vendor, payee_not_allowlisted, analyst_hold, verifier_hold
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
+budget_exhausted         hold     deny     soft   otari_west_budget_not_configured
+  note: No second key budget is attached, so Otari cannot refuse this agent for spend.
+guardrail_block          hold     deny     soft   otari_guardrails_not_configured
+  note: No Otari guardrails service is configured on this workspace.
+fallback_routing         allow    allow    yes    ok
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=True analyst_rec=allow verifier_rec=allow
+
+Audit chain: OK (9 events)
+
+Otari features exercised in this run:
+  [yes] Open-weight analyst model
+  [yes] Open-weight verifier model
+  [yes] Multiple models, distinct roles
+  [yes] Model routing / fallback
+  [yes] App-level fallback (no Otari routing policy configured)
+  [yes] MCP books tools (in-process)
+  [ no] Web search
+  [ no] Web fetch
+  [yes] Code execution
+  [yes] Budgets and spending limits
+  [yes] Per-user budgets
+  [ no] Guardrails
+
+Honesty notes:
+- No payment rail is connected. ALLOW records intent; it does not move money.
+- Sample vendors, bills, and search hits are invented for the demo.
+- Live calls used the hosted gateway at api.otari.ai. Costs come from /key/usage/summary.
+- Web search and web fetch are workspace-disabled on this account.
+- Otari guardrails are not configured (no guardrails service / profiles).
+- Routing policies cannot be created with a workspace key; fallback_routing uses an app-level retry.
+- Per-user / second-key budgets are not attached; budget_exhausted cannot be refused by Otari yet.
+- MCP books tools ran in-process. No Otari MCP server URL is registered.
+- Code execution is billed by Otari and was used once on allow_routine to limit spend.
+
+Usage by model (from Otari, redacted):
+[
+  {
+    "key": "code_execution",
+    "label": null,
+    "cost": 0.04,
+    "tokens": 0,
+    "requests": 4,
+    "is_other": false
+  },
+  {
+    "key": "zai-org/GLM-5.3-Flash",
+    "label": null,
+    "cost": 0.001057,
+    "tokens": 4065,
+    "requests": 17,
+    "is_other": false
+  },
+  {
+    "key": "XiaomiMiMo/MiMo-V2.6-Flash",
+    "label": null,
+    "cost": 0.000937,
+    "tokens": 6587,
+    "requests": 17,
+    "is_other": false
+  },
+  {
+    "key": "xiaomi/mimo-v2.6-flash",
+    "label": null,
+    "cost": 0.0,
+    "tokens": 0,
+    "requests": 2,
+    "is_other": false
+  },
+  {
+    "key": "unknown",
+    "label": null,
+    "cost": 0.0,
+    "tokens": 0,
+    "requests": 1,
+    "is_other": false
+  },
+  {
+    "key": "tripwire-analyst",
+    "label": null,
+    "cost": 0.0,
+    "tokens": 0,
+    "requests": 3,
+    "is_other": false
+  },
+  {
+    "key": "builtin_fetch",
+    "label": null,
+    "cost": 0.0,
+    "tokens": 0,
+    "requests": 1,
+    "is_other": false
+  }
+]
+Usage by tool:
+[
+  {
+    "tool": "code_execution",
+    "calls": 4,
+    "errors": 0,
+    "requests": 4,
+    "cost": 0.04
+  }
+]
+
+Finished at 2026-11-10 09:43 EST

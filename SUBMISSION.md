@@ -41,27 +41,48 @@ The sample desk is a small wholesale distributor: packaging, grocery wholesale, 
 
 ### How Otari is used
 
-- Hosted gateway at `https://api.otari.ai/api/v1` (OpenAI-compatible `chat/completions`).
-- Two open-weight models in distinct roles: analyst (default DeepSeek selector from Otari's quickstart) and verifier (default Mistral Large 4).
-- A Fallback routing policy, `tripwire-analyst`, sent as the model name on the failover scenario.
-- Built-in tools on the analyst request: `otari_web_search`, `otari_web_fetch`, `otari_code_execution`.
-- MCP books tools (`list_vendors`, `get_vendor`, `list_open_bills`), used in the agent loop; a stdio MCP server is included so the same tools can be registered in the Otari dashboard.
-- Spend budgets and per-user key caps, with the agent id sent as the chat `user`.
-- A `prompt-injection` guardrail in block mode on every chat request.
+- Hosted gateway at `https://api.otari.ai/api/v1` (OpenAI-compatible `chat/completions`, US region).
+- Two open-weight models in distinct roles, selectors confirmed with `GET /api/v1/models`:
+  - Analyst / screener: `xiaomi/mimo-v2.6-flash` (catalog $0.14 / $0.28 per million tokens, tools supported). Served by DeepInfra as `XiaomiMiMo/MiMo-V2.6-Flash`.
+  - Tighten-only verifier: `z-ai/glm-5.3-flash` (catalog $0.15 / $0.50 per million, tools supported). Served as `zai-org/GLM-5.3-Flash`.
+- Code execution via `POST /api/v1/code/execute` to re-sum the routine invoice lines (live, billed at $0.01 per call).
+- The failover scenario names the `tripwire-analyst` routing policy first. That policy is not in the dashboard yet, so the client retries with the analyst model and records an app-level fallback (`fallback=True` on the successful live run).
+- Books tools (`list_vendors`, `get_vendor`, `list_open_bills`) run in-process on every scenario. They are not yet registered as an Otari MCP server.
 
-Live use requires an Otari.ai account and workspace tokens. Until those are set, the repo runs a clearly labeled mock of the same interface so the policy gate, audit log, and sample scenarios can be reviewed offline.
+### Otari features used (rubric list, honest)
 
-### Otari features used (rubric list)
+Used live on 10 Nov 2026:
 
 - Open-weight models (analyst + verifier)
-- Model routing and fallbacks
-- MCP integrations
-- Web search and web fetch
-- Code execution
-- Budgets and spending limits
 - Multiple models serving distinct roles
-- Guardrails
-- Per-user budgets
+- Code execution
+- App-level fallback after an unconfigured routing-policy name (not an Otari dashboard policy yet)
+
+Wired in the client, but not yet live on this workspace (dashboard steps below):
+
+- Model routing and fallbacks as an Otari policy
+- MCP integrations inside Otari (a reachable HTTP MCP URL)
+- Web search and web fetch (`workspace_disabled` / `web_access_disabled`)
+- Guardrails (no guardrails service configured; sending a profile returns 502)
+- Budgets and per-user / per-key spend ceilings (the budget endpoint answers, but `limits` is empty, so Otari does not refuse)
+
+### Live run (10 Nov 2026, 9:43 AM America/New_York)
+
+Log: `docs/demo_run_live.txt`. Tests: 13 passed. Cumulative usage on the `tripwire-otari` key after the successful run: **$0.041994** (45 requests, 10,652 tokens). Almost all of that is four code-execution calls at $0.01; the two chat models together were about $0.002. The $2.00 welcome credit remains almost entirely unused.
+
+Hard scenario expectations all matched: routine allow, hold over threshold, blocked-country deny, over-cap deny, line-total hold, unknown-vendor hold, and the fallback path allow. Two scenarios are marked soft until the dashboard work is done: `budget_exhausted` and `guardrail_block`.
+
+### Dashboard-only steps still needed
+
+The workspace token cannot create routing policies, mandate guardrails, enable web access, or attach spend ceilings (those routes want a master key or a signed-in dashboard session). In the Default workspace (US):
+
+1. **Web search and web fetch.** Tools → turn on `otari_web_search` and `otari_web_fetch`. `otari_code_execution` is already available. If search still returns `web_access_disabled`, add or enable a workspace/organization search key if the Tools page offers one.
+2. **Routing policy.** Routing → Policies → Create policy → Fallback → name it exactly `tripwire-analyst` → main model `xiaomi/mimo-v2.6-flash`, backup e.g. `z-ai/glm-5.3-flash` or `deepseek/deepseek-v4.1-flash`. After that, the demo can drop the app-level retry.
+3. **Guardrails.** Routing → Guardrails (or Organization → Guardrails) → Configure a catalog guardrail (several vendors ask for their own API key) → Mandate it in **block** mode on the Default workspace. Until a service is configured, a request-level `prompt-injection` profile returns 502 and is not sent.
+4. **Budgets.** Spend & budgets → add a USD budget and attach it to the `tripwire-otari` key. For the west-agent scenario, create a second key, cap it low (or spend it down), and put that token in `OTARI_API_KEY_WEST` in `.env` only.
+5. **MCP.** Tools → MCP servers → register a Streamable-HTTP URL that Otari can reach (stdio is not enough). Then set `OTARI_MCP_SERVER_URL` in `.env`.
+
+Do not paste tokens into chat. Do not commit `.env`.
 
 ### Tech stack
 
@@ -138,8 +159,8 @@ Nothing below has been done for you.
 
 1. **Confirm registration.** You are on DoraHacks as Sam Desigan. If the email to marcus+wilding@mozilla.org was never sent, approve a short sign-up email first.
 2. **Otari.ai account.** Sign up at https://otari.ai/dashboard/#/signup if you do not already have an account (first 200 sign-ups receive $20 in tokens, if that offer is still open). Join the Mozilla OSAI Discord and grant the `devs-wilding` role. Star https://github.com/mozilla-ai/otari.
-3. **Workspace setup, then a token.** In the dashboard: confirm two open-weight model selectors; create a Fallback policy named `tripwire-analyst`; attach budgets, including a tight cap on a second key for `ap-agent-west`; mandate a prompt-injection guardrail in block mode; enable web search, web fetch, and code execution. Create workspace API keys (`otk_…`). Put them in `.env` only, never in chat.
-4. **Live demo.** Set `OTARI_MODE=live` and rerun `python scripts/demo.py`. Confirm the requests on the Otari Overview. This MOCK run is not enough for prize eligibility.
+3. **Finish the dashboard-only setup** listed above if you want the remaining rubric features (search, fetch, Otari routing, guardrails, key budgets, hosted MCP). Tokens stay in `.env` only, never in chat.
+4. **Live demo (already run once).** A successful `OTARI_MODE=live python scripts/demo.py` is in `docs/demo_run_live.txt`. After any dashboard changes, rerun it and confirm the new requests on the Otari Overview. For the video, record against a live run, not the mock.
 5. **Approve and publish the repo** under Cubiczan (not icohangar-ops), public, branch `devs-wilding`. After the push, paste the first Otari commit URL into this file. I will not create or push the GitHub repo until you say so.
 6. **Record the demo video yourself** (3–5 minutes, your screen, your voice, no AI). Shot list: [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). Upload it, then paste the link.
 7. **Feedback.** Record a second 3–5 minute feedback video and/or finalize [FEEDBACK_DRAFT.md](FEEDBACK_DRAFT.md) in your own words after the live run.

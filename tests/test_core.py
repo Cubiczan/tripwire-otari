@@ -180,7 +180,7 @@ def test_live_chat_does_not_put_key_in_result(monkeypatch):
         def post(self, url, headers=None, json=None):
             assert "otk_" in headers["Authorization"]
             assert "api/v1/chat/completions" in url
-            assert json["user"] == "ap-agent-east"
+            assert "user" not in json  # a mismatched user field is a 403 on hosted Otari
             assert json["guardrails"][0]["profile"] == "prompt-injection"
             return FakeResp()
 

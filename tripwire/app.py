@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +14,7 @@ from tripwire.otari import load_settings
 
 ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD = ROOT / "dashboard"
+load_dotenv(ROOT / ".env")
 
 _gate: Tripwire | None = None
 _scenarios: list[dict] = []

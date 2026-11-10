@@ -18,10 +18,11 @@ from typing import Any
 import httpx
 
 DEFAULT_BASE = "https://api.otari.ai/api/v1"
-DEFAULT_ANALYST = "deepseek/deepseek-v4-pro-0813"
-DEFAULT_VERIFIER = "mistral/mistral-large-4"
+DEFAULT_ANALYST = "xiaomi/mimo-v2.6-flash"
+DEFAULT_VERIFIER = "z-ai/glm-5.3-flash"
 DEFAULT_ROUTE = "tripwire-analyst"
 DEFAULT_GUARDRAIL = "prompt-injection"
+DEFAULT_MAX_TOKENS = 256
 
 # Prefixes that look like a workspace token. Used only to redact, never to print.
 _KEY_PREFIXES = ("otk_", "tk-", "sk-")
@@ -90,6 +91,8 @@ class OtariResult:
             "error_type": self.error_type,
             "error_detail": self.error_detail,
             "mock": self.mock,
+            "parsed": self.parsed,
+            "content_preview": (self.content or "")[:400],
         }
 
 
@@ -113,6 +116,10 @@ def load_settings() -> dict:
         "model_verifier": os.environ.get("OTARI_MODEL_VERIFIER") or DEFAULT_VERIFIER,
         "model_route": os.environ.get("OTARI_MODEL_ROUTE") or DEFAULT_ROUTE,
         "guardrail_profile": os.environ.get("OTARI_GUARDRAIL_PROFILE") or DEFAULT_GUARDRAIL,
+        "max_tokens": int(os.environ.get("OTARI_MAX_TOKENS") or DEFAULT_MAX_TOKENS),
+        # Only send `user` when it matches the key owner; a mismatch is a 403.
+        "user_field": (os.environ.get("OTARI_USER") or "").strip(),
+        "mcp_server_url": (os.environ.get("OTARI_MCP_SERVER_URL") or "").strip(),
     }
 
 
@@ -132,9 +139,13 @@ class OtariClient:
         # Keys stay on the instance and are never included in logs or results.
         self._keys = {
             "default": (os.environ.get("OTARI_API_KEY") or "").strip(),
-            "ap-agent-west": (os.environ.get("OTARI_API_KEY_WEST") or os.environ.get("OTARI_API_KEY") or "").strip(),
+            "ap-agent-west": (os.environ.get("OTARI_API_KEY_WEST") or "").strip(),
             "ap-agent-east": (os.environ.get("OTARI_API_KEY") or "").strip(),
         }
+        if not self._keys["ap-agent-west"]:
+            self._keys["ap-agent-west"] = self._keys["default"]
+        self._tools_cache: list[dict] | None = None
+        self._guardrails_configured: bool | None = None
 
     def close(self) -> None:
         if self._owns_http and self._http is not None:
@@ -143,7 +154,7 @@ class OtariClient:
 
     def _client(self) -> httpx.Client:
         if self._http is None:
-            self._http = httpx.Client(timeout=45.0)
+            self._http = httpx.Client(timeout=60.0)
             self._owns_http = True
         return self._http
 
@@ -153,25 +164,91 @@ class OtariClient:
         return self._keys.get("default") or ""
 
     def tools_payload(self) -> list[dict]:
-        return [
-            {"type": "otari_web_search"},
-            {"type": "otari_web_fetch"},
-            {"type": "otari_code_execution"},
-        ]
+        if self.mode == "mock":
+            return [
+                {"type": "otari_web_search"},
+                {"type": "otari_web_fetch"},
+                {"type": "otari_code_execution"},
+            ]
+        return [{"type": t["id"]} for t in self.list_tools() if t.get("available") and t.get("id")]
+
+    def guardrails_configured(self) -> bool:
+        if self.mode == "mock":
+            return True
+        if self._guardrails_configured is not None:
+            return self._guardrails_configured
+        try:
+            resp = self._client().get(
+                f"{self.base_url}/tool-settings/guardrails/profiles",
+                headers=self._headers(self._key_for(None)),
+            )
+            data = _safe_json(resp)
+            self._guardrails_configured = bool(data.get("available") and data.get("profiles"))
+        except httpx.HTTPError:
+            self._guardrails_configured = False
+        return self._guardrails_configured
 
     def guardrails_payload(self) -> list[dict]:
+        if self.mode == "live" and not self.guardrails_configured():
+            return []
         return [{"profile": self.settings["guardrail_profile"], "mode": "block"}]
 
     def mcp_declaration(self) -> list[dict]:
-        # Declaration matches Otari's request field (`mcp_servers`). The local
-        # demo runs the same tools in-process; a hosted account still has to
-        # register a reachable MCP server in the Otari dashboard.
+        # Mock: declare the in-process books tools. Live: only when a gateway-
+        # reachable MCP URL is configured (Otari requires name + url).
+        if self.mode == "live":
+            url = self.settings.get("mcp_server_url") or ""
+            if not url:
+                return []
+            return [{"name": "tripwire-books", "url": url, "allowed_tools": ["list_vendors", "get_vendor", "list_open_bills"]}]
         return [
             {
                 "name": "tripwire-books",
                 "tools": ["list_vendors", "get_vendor", "list_open_bills"],
             }
         ]
+
+    def list_tools(self) -> list[dict]:
+        if self.mode == "mock":
+            return [
+                {"id": "otari_web_search", "available": True, "reason": None},
+                {"id": "otari_web_fetch", "available": True, "reason": None},
+                {"id": "otari_code_execution", "available": True, "reason": None},
+            ]
+        if self._tools_cache is not None:
+            return self._tools_cache
+        try:
+            resp = self._client().get(f"{self.base_url}/tools", headers=self._headers(self._key_for(None)))
+            data = _safe_json(resp)
+            items = data.get("data") if isinstance(data, dict) else []
+            self._tools_cache = [t for t in items if isinstance(t, dict)]
+        except httpx.HTTPError:
+            self._tools_cache = []
+        return self._tools_cache
+
+    def usage_summary(self) -> dict:
+        """Key usage totals. Never includes the token."""
+        if self.mode == "mock":
+            return {"mock": True, "cost": 0, "request_count": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "error_count": 0, "by_model": [], "by_tool": []}
+        try:
+            resp = self._client().get(f"{self.base_url}/key/usage/summary", headers=self._headers(self._key_for(None)))
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": type(exc).__name__}
+        data = _safe_json(resp)
+        totals = data.get("totals") or {}
+        return {
+            "ok": resp.status_code < 400,
+            "status_code": resp.status_code,
+            "cost": totals.get("cost"),
+            "prompt_tokens": totals.get("prompt_tokens"),
+            "completion_tokens": totals.get("completion_tokens"),
+            "total_tokens": totals.get("total_tokens"),
+            "request_count": totals.get("request_count"),
+            "error_count": totals.get("error_count"),
+            "unpriced_requests": totals.get("unpriced_requests"),
+            "by_model": data.get("by_model") or [],
+            "by_tool": data.get("by_tool") or [],
+        }
 
     def budget(self, agent_id: str) -> BudgetSnapshot:
         if self.mode == "mock":
@@ -187,7 +264,8 @@ class OtariClient:
         tools: list[dict] | None = None,
         guardrails: list[dict] | None = None,
         mcp_servers: list[dict] | None = None,
-        max_tokens: int = 512,
+        max_tokens: int | None = None,
+        fallback_model: str | None = None,
         scenario_id: str | None = None,
         invoice: dict | None = None,
         use_tools: bool = False,
@@ -210,7 +288,8 @@ class OtariClient:
             tools=tools,
             guardrails=guardrails,
             mcp_servers=mcp_servers,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else int(self.settings.get("max_tokens") or DEFAULT_MAX_TOKENS),
+            fallback_model=fallback_model,
         )
 
     def code_execute(self, code: str, agent_id: str, lines: list[dict] | None = None) -> OtariResult:
@@ -316,6 +395,50 @@ class OtariClient:
         guardrails: list[dict] | None,
         mcp_servers: list[dict] | None,
         max_tokens: int,
+        fallback_model: str | None = None,
+    ) -> OtariResult:
+        result = self._post_chat(
+            model=model,
+            messages=messages,
+            agent_id=agent_id,
+            tools=tools,
+            guardrails=guardrails,
+            mcp_servers=mcp_servers,
+            max_tokens=max_tokens,
+        )
+        if (
+            not result.ok
+            and fallback_model
+            and fallback_model != model
+            and result.error_type in {"http_error", "otari_unreachable", "guardrails_not_configured"}
+        ):
+            retry = self._post_chat(
+                model=fallback_model,
+                messages=messages,
+                agent_id=agent_id,
+                tools=tools,
+                guardrails=guardrails,
+                mcp_servers=mcp_servers,
+                max_tokens=max_tokens,
+            )
+            retry.fallback = True
+            retry.model_requested = model
+            if "app_fallback" not in retry.features:
+                retry.features.append("app_fallback")
+            retry.features.append("routing_fallback")
+            return retry
+        return result
+
+    def _post_chat(
+        self,
+        *,
+        model: str,
+        messages: list[dict],
+        agent_id: str,
+        tools: list[dict] | None,
+        guardrails: list[dict] | None,
+        mcp_servers: list[dict] | None,
+        max_tokens: int,
     ) -> OtariResult:
         key = self._key_for(agent_id)
         if not key:
@@ -331,8 +454,12 @@ class OtariClient:
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "user": agent_id,
+            "response_format": {"type": "json_object"},
         }
+        # Only send `user` when explicitly configured to the key's owner.
+        user_field = self.settings.get("user_field") or ""
+        if user_field:
+            body["user"] = user_field
         if tools:
             body["tools"] = tools
         if guardrails:
@@ -373,12 +500,24 @@ class OtariClient:
                     )
         parsed = _extract_json(content)
         features = []
-        if "tools" in (data.get("usage") or {}) or "otari_web_search" in json.dumps(data):
+        usage_blob = json.dumps(data)
+        if "otari_web_search" in usage_blob:
             features.append("web_search")
+        if "otari_web_fetch" in usage_blob:
+            features.append("web_fetch")
+        if "otari_code_execution" in usage_blob or "code_execution" in (usage or {}):
+            features.append("code_execution")
         model_used = headers.get("Otari-Model") or headers.get("otari-model") or data.get("model") or model
         fallback = str(headers.get("Otari-Fallback") or headers.get("otari-fallback") or "").lower() == "true"
         if fallback:
             features.append("routing_fallback")
+        cost = None
+        if isinstance(usage, dict):
+            raw_cost = usage.get("cost_usd") if usage.get("cost_usd") is not None else usage.get("estimated_cost")
+            try:
+                cost = float(raw_cost) if raw_cost is not None else None
+            except (TypeError, ValueError):
+                cost = None
         result = OtariResult(
             ok=resp.status_code < 400 and error_type is None,
             content=content if isinstance(content, str) else json.dumps(content),
@@ -386,6 +525,7 @@ class OtariClient:
             model_used=str(model_used),
             fallback=fallback,
             usage=usage if isinstance(usage, dict) else {},
+            cost_usd=cost,
             status_code=resp.status_code,
             error_type=error_type,
             error_detail=error_detail,
@@ -606,6 +746,12 @@ def _classify_error(resp: httpx.Response) -> tuple[str | None, str]:
     code = str(err.get("code") or err.get("type") or data.get("code") or "")
     message = str(err.get("message") or data.get("detail") or data.get("message") or resp.text or "")[:400]
     lowered = (code + " " + message).lower()
+    if "does not match the authenticated API key's user" in message:
+        return "user_mismatch", message
+    if "no guardrails service is configured" in lowered or "guardrail profile" in lowered and "not" in lowered:
+        return "guardrails_not_configured", message or "No Otari guardrails service is configured."
+    if "web_access_disabled" in lowered or "web search is not enabled" in lowered or "web access is not enabled" in lowered:
+        return "web_access_disabled", message
     if resp.status_code == 403 and ("guardrail" in lowered or code == "guardrail_violation"):
         return "guardrail_violation", message or "Otari guardrail blocked the request."
     if resp.status_code in (402, 429) or "budget" in lowered:

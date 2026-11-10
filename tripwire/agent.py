@@ -16,19 +16,21 @@ ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS_PATH = ROOT / "data" / "scenarios.json"
 
 ANALYST_SYSTEM = (
-    "You are Tripwire's invoice analyst. Review the invoice, use the offered "
-    "Otari tools when they help, and answer with a single JSON object: "
+    "Tripwire invoice analyst. Reply with a compact JSON object only: "
     '{"recommendation":"allow|hold|deny","reasons":["..."],"line_total":0,'
-    '"notes":"..."}. You may recommend a tighter decision than the policy '
-    "gate, never a looser one. Do not invent vendors or amounts."
+    '"notes":"..."}. Keep reasons to short phrases and notes to one sentence. '
+    "A matching open bill for the same vendor and amount supports allow; it is "
+    "not a duplicate payment. You may tighten, never loosen. Do not invent amounts."
 )
 
 VERIFIER_SYSTEM = (
-    "You are Tripwire's tighten-only verifier. You see the policy verdict and "
-    "the analyst packet. Reply with JSON: "
+    "Tripwire tighten-only verifier. Reply with a compact JSON object only: "
     '{"recommendation":"allow|hold|deny","reasons":["..."],"notes":"..."}. '
-    "You may hold or deny something the analyst allowed. You may not allow "
-    "something the policy or analyst already held or denied."
+    "Recommend hold or deny only when you can name a concrete books or policy "
+    "issue. A matching open bill supports allow. Do not escalate a policy hold "
+    "to deny unless the payee country is blocked or the amount is over the hard cap. "
+    "If the policy decision is allow and you see no new issue, recommend allow. "
+    "You may not loosen a hold or deny."
 )
 
 
@@ -187,22 +189,76 @@ class Tripwire:
             elif verdict.decision != Decision.ALLOW:
                 flag(verdict.decision, reason)
 
+        # Spend control on live: skip model calls when the deterministic gate
+        # has already denied, and skip Otari chat when a scored feature is not
+        # actually configured (guardrails).
+        if self.client.mode == "live" and decision == Decision.DENY:
+            return self._finish(
+                scenario, decision, reasons, features, budget_public, books_info, {}, {}, at, req,
+            )
+        if (
+            self.client.mode == "live"
+            and scenario.get("id") == "guardrail_block"
+            and not self.client.guardrails_configured()
+        ):
+            flag(Decision.HOLD, "otari_guardrails_not_configured")
+            return self._finish(
+                scenario, decision, reasons, features, budget_public, books_info, {}, {}, at, req,
+            )
+        if (
+            self.client.mode == "live"
+            and scenario.get("id") == "budget_exhausted"
+            and not budget.exhausted
+        ):
+            flag(Decision.HOLD, "otari_west_budget_not_configured")
+            return self._finish(
+                scenario, decision, reasons, features, budget_public, books_info, {}, {}, at, req,
+            )
+
+        if self.client.mode == "live" and scenario.get("id") == "allow_routine":
+            code = (
+                "lines = " + json.dumps(scenario.get("lines") or []) + "\n"
+                "total = 0.0\n"
+                "for line in lines:\n"
+                "    total += float(line['ext']) if line.get('ext') is not None else float(line['qty']) * float(line['unit'])\n"
+                "print(round(total, 2))\n"
+            )
+            executed = self.client.code_execute(code, agent_id, lines=scenario.get("lines") or [])
+            features.extend(executed.features or ["code_execution"])
+            books_info = dict(books_info)
+            books_info["otari_code_execution"] = {
+                "ok": executed.ok,
+                "content": (executed.content or "")[:200],
+                "mock": executed.mock,
+                "error_type": executed.error_type,
+            }
+            if executed.ok:
+                try:
+                    remote_total = float((executed.content or "").strip().splitlines()[-1])
+                    if abs(remote_total - float(scenario["amount"])) > 0.01:
+                        flag(Decision.HOLD, "line_total_mismatch")
+                except ValueError:
+                    pass
+
         use_route = bool(scenario.get("use_route"))
         analyst_model = self.settings["model_route"] if use_route else self.settings["model_analyst"]
         analyst_messages = [
             {"role": "system", "content": ANALYST_SYSTEM},
             {"role": "user", "content": _analyst_prompt(scenario, books_info, computed)},
         ]
+        live = self.client.mode == "live"
         analyst = self.client.chat(
             model=analyst_model,
             messages=analyst_messages,
             agent_id=agent_id,
-            tools=self.client.tools_payload(),
+            tools=[] if live else self.client.tools_payload(),
             guardrails=self.client.guardrails_payload(),
             mcp_servers=self.client.mcp_declaration(),
+            max_tokens=int(self.settings.get("max_tokens") or 256),
+            fallback_model=self.settings["model_analyst"] if use_route else None,
             scenario_id=scenario.get("id"),
             invoice=scenario,
-            use_tools=True,
+            use_tools=not live,
         )
         features.extend(analyst.features)
         if analyst.fallback:
@@ -264,6 +320,7 @@ class Tripwire:
             messages=verifier_messages,
             agent_id=agent_id,
             guardrails=self.client.guardrails_payload(),
+            max_tokens=int(self.settings.get("max_tokens") or 256),
             scenario_id=scenario.get("id"),
             invoice=scenario,
             use_tools=False,
@@ -409,9 +466,6 @@ def _analyst_prompt(scenario: dict, books_info: dict, computed: float) -> str:
         },
         "computed_line_total": computed,
         "books": books_info,
-        "instructions": (
-            "Use Otari web search or fetch if you need a public vendor check, "
-            "and Otari code execution to re-sum the line items. Then recommend."
-        ),
+        "instructions": "Recommend allow, hold, or deny from the invoice and books. JSON only.",
     }
     return json.dumps(payload, default=str)
