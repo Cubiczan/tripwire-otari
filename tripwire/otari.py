@@ -56,6 +56,22 @@ class BudgetSnapshot:
     mock: bool
     source: str
     detail: str = ""
+    resets_at: str = ""
+    limits: list = field(default_factory=list)
+
+    def to_public_dict(self) -> dict:
+        return {
+            "agent_id": self.agent_id,
+            "limit_usd": self.limit_usd,
+            "spent_usd": self.spent_usd,
+            "remaining_usd": self.remaining_usd,
+            "exhausted": self.exhausted,
+            "mock": self.mock,
+            "source": self.source,
+            "detail": self.detail,
+            "resets_at": self.resets_at,
+            "limits": list(self.limits or []),
+        }
 
 
 @dataclass
@@ -94,6 +110,48 @@ class OtariResult:
             "parsed": self.parsed,
             "content_preview": (self.content or "")[:400],
         }
+
+
+def parse_budget_payload(data: dict, *, agent_id: str, mock: bool, source: str) -> BudgetSnapshot:
+    """Parse GET /key/budget, including the hosted `limits` array."""
+    raw_limits = data.get("limits") if isinstance(data.get("limits"), list) else []
+    limits: list[dict] = []
+    for lim in raw_limits:
+        if not isinstance(lim, dict):
+            continue
+        limits.append(
+            {
+                "scope": lim.get("scope"),
+                "limit_usd": lim.get("limit_usd"),
+                "used_usd": lim.get("used_usd"),
+                "remaining_usd": lim.get("remaining_usd"),
+                "resets_at": lim.get("resets_at"),
+            }
+        )
+    usd = [item for item in limits if item.get("limit_usd") is not None]
+    if usd:
+        tight = min(usd, key=lambda item: float(item["remaining_usd"] if item.get("remaining_usd") is not None else 0))
+        limit = float(tight.get("limit_usd") or 0)
+        spent = float(tight.get("used_usd") or 0)
+        remaining = float(tight["remaining_usd"] if tight.get("remaining_usd") is not None else max(limit - spent, 0))
+        resets_at = str(tight.get("resets_at") or "")
+    else:
+        limit = float(data.get("max_budget") or data.get("limit") or data.get("limit_usd") or 0)
+        spent = float(data.get("spend") or data.get("spent") or data.get("spent_usd") or data.get("used_usd") or 0)
+        remaining = float(data.get("remaining") or data.get("remaining_usd") or (limit - spent if limit else 0))
+        resets_at = str(data.get("resets_at") or "")
+    exhausted = bool(data.get("exhausted")) or (limit > 0 and remaining <= 0)
+    return BudgetSnapshot(
+        agent_id=agent_id,
+        limit_usd=limit,
+        spent_usd=spent,
+        remaining_usd=remaining,
+        exhausted=exhausted,
+        mock=mock,
+        source=source,
+        resets_at=resets_at,
+        limits=limits,
+    )
 
 
 def load_settings() -> dict:
@@ -324,6 +382,52 @@ class OtariClient:
             )
         return self._parse_code_response(resp)
 
+    def web_fetch(self, url: str, agent_id: str) -> OtariResult:
+        if self.mode == "mock":
+            return OtariResult(
+                ok=True,
+                content="MOCK fetch of a sample official page.",
+                tool_events=[{"tool": "otari_web_fetch", "url": url, "result": {"note": "MOCK"}}],
+                features=["web_fetch"],
+                mock=True,
+                parsed={"url": url, "mock": True},
+            )
+        key = self._key_for(agent_id)
+        try:
+            resp = self._client().post(
+                f"{self.base_url}/fetch",
+                headers=self._headers(key),
+                json={"url": url},
+            )
+        except httpx.HTTPError as exc:
+            return OtariResult(
+                ok=False,
+                status_code=0,
+                error_type="otari_unreachable",
+                error_detail=type(exc).__name__,
+                features=["web_fetch"],
+                mock=False,
+            )
+        error_type, error_detail = _classify_error(resp)
+        data = _safe_json(resp)
+        text = str(data.get("text") or data.get("content") or "")
+        return OtariResult(
+            ok=resp.status_code < 400 and error_type is None,
+            content=text,
+            tool_events=[{"tool": "otari_web_fetch", "url": data.get("final_url") or url, "fetch_tool": data.get("fetch_tool")}],
+            features=["web_fetch"],
+            status_code=resp.status_code,
+            error_type=error_type,
+            error_detail=error_detail,
+            mock=False,
+            parsed={
+                "url": data.get("final_url") or url,
+                "fetch_tool": data.get("fetch_tool"),
+                "content_type": data.get("content_type"),
+                "title": data.get("title"),
+            },
+        )
+
     # --- live ---
 
     def _headers(self, key: str) -> dict[str, str]:
@@ -371,19 +475,7 @@ class OtariClient:
                 detail="Budget endpoint was not readable; Tripwire will still fail closed on a budget refusal from chat.",
             )
         data = _safe_json(resp)
-        limit = float(data.get("max_budget") or data.get("limit") or data.get("limit_usd") or 0)
-        spent = float(data.get("spend") or data.get("spent") or data.get("spent_usd") or 0)
-        remaining = float(data.get("remaining") or data.get("remaining_usd") or (limit - spent if limit else 0))
-        exhausted = bool(data.get("exhausted")) or (limit > 0 and remaining <= 0)
-        return BudgetSnapshot(
-            agent_id=agent_id,
-            limit_usd=limit,
-            spent_usd=spent,
-            remaining_usd=remaining,
-            exhausted=exhausted,
-            mock=False,
-            source="key/budget",
-        )
+        return parse_budget_payload(data, agent_id=agent_id, mock=False, source="key/budget")
 
     def _live_chat(
         self,
@@ -511,6 +603,9 @@ class OtariClient:
         fallback = str(headers.get("Otari-Fallback") or headers.get("otari-fallback") or "").lower() == "true"
         if fallback:
             features.append("routing_fallback")
+        if resp.status_code < 400 and model and "/" not in model and ":" not in model:
+            # Policy names are not provider/model selectors (e.g. tripwire-analyst).
+            features.append("routing_policy")
         cost = None
         if isinstance(usage, dict):
             raw_cost = usage.get("cost_usd") if usage.get("cost_usd") is not None else usage.get("estimated_cost")

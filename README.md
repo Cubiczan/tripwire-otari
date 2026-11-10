@@ -10,9 +10,10 @@ agent proposes a payment or write
         ▼
   hosted Otari.ai  ──  open-weight analyst + verifier
         │               routing / fallback
-        │               web search, web fetch, code execution
-        │               MCP books tools
-        │               budgets, per-user key caps, guardrails
+        │               routing policy, web fetch, code execution
+        │               MCP books tools (in-process)
+        │               key budget read-back
+        │               Tripwire policy gate as the guardrail layer
         ▼
   Tripwire policy gate  ──  ALLOW / HOLD / DENY (tighten-only)
         ▼
@@ -27,11 +28,11 @@ This is the Otari edition of [Tripwire](https://github.com/Cubiczan/tripwire). T
 
 ## Status, honestly
 
-A live run against hosted Otari.ai succeeded on 10 Nov 2026, 9:43 AM America/New_York (see [docs/demo_run_live.txt](docs/demo_run_live.txt)). The analyst is `xiaomi/mimo-v2.6-flash`; the verifier is `z-ai/glm-5.3-flash`. Cumulative usage on the workspace key after that run was **$0.041994**, mostly four Otari code-execution calls at $0.01 each (smoke test plus demo reruns). Chat tokens were a small fraction of a cent. The $2.00 welcome credit was not close to being used up.
+A live run against hosted Otari.ai succeeded on 10 Nov 2026, 9:53 AM America/New_York (see [docs/demo_run_live.txt](docs/demo_run_live.txt)). Analyst chats go through the `tripwire-analyst` Fallback policy (primary `xiaomi/mimo-v2.6-flash`, backup `z-ai/glm-5.3-flash`). The verifier is `z-ai/glm-5.3-flash`. The demo also made one official-page web fetch (`https://ofac.treasury.gov/` on the blocked-country invoice) and one code-execution call, and it printed the `tripwire-otari` key's $1.00 monthly budget from `GET /key/budget`. Cumulative usage after that run was **$0.072451**; the monthly ceiling showed **$0.030457 used / $1.00**. Chat tokens were a small fraction of a cent. The $2.00 welcome credit was not close to being used up.
 
 Without `OTARI_API_KEY`, or with `OTARI_MODE=mock`, the app still runs a clearly labeled mock of the same request shapes. The dashboard banner says MOCK MODE in that case.
 
-Not every rubric feature is live yet. Web search, web fetch, Otari-native routing policies, mandated guardrails, per-key spend ceilings, and a hosted MCP server need dashboard setup (the workspace token cannot create those). Those gaps are listed in [SUBMISSION.md](SUBMISSION.md).
+Not every rubric feature is live. Web search still needs a search tool/provider on Tools & Guardrails (`POST /search` returns 400 even though `GET /tools` lists it). Otari catalog guardrails were skipped because every option needs an outside vendor key; Tripwire's own policy gate is the guardrail layer. There is no second/west key budget and no hosted MCP server. Those gaps are listed in [SUBMISSION.md](SUBMISSION.md).
 
 Prize eligibility requires a **live** run against Otari.ai, a **public** repository, a **hackathon branch**, a link to the **first commit where Otari came in**, and a **3–5 minute participant-narrated screen recording** (no AI video or voice). See [RULES.md](RULES.md), [SUBMISSION.md](SUBMISSION.md), and [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md).
 
@@ -45,13 +46,13 @@ Sample data is a small wholesale / distribution AP desk (packaging, wholesale, f
 |---|---|---|
 | Routine $185 carton invoice | ALLOW | Allowlisted vendor, matching open bill, totals agree |
 | $2,400 fixture invoice | HOLD | Over the $1,000 review threshold |
-| Payee in a blocked country | DENY | Country policy |
+| Payee in a blocked country | DENY | Country policy, corroborated by one OFAC web fetch |
 | $12,000 freight prepay | DENY | Over the $5,000 hard cap |
 | Invoice total does not match lines | HOLD | Books + Otari code execution |
 | Vendor missing from the books | HOLD | MCP books lookup |
-| West-coast agent has no Otari budget left | DENY | Per-user key budget |
-| Prompt-injection memo | DENY | Otari guardrail, before a provider is called |
-| Analyst routing policy | ALLOW | Fallback path is used and recorded |
+| West-coast agent has no Otari budget left | DENY in mock; soft HOLD live | No second/west key is attached; the $1.00 ceiling is on `tripwire-otari` and is not exhausted |
+| Prompt-injection memo | DENY in mock; soft HOLD live | Otari catalog guardrails need an outside vendor key; Tripwire's policy gate is the guardrail layer |
+| Analyst routing policy | ALLOW | Live calls use `tripwire-analyst`; Otari served the primary model |
 
 A person can approve or deny a HOLD. That records intent only. **No payment rail is connected.**
 
@@ -62,13 +63,13 @@ These map to the official rubric. In MOCK mode they are exercised against the do
 | Rubric item | How Tripwire uses it |
 |---|---|
 | Open-weight models (two roles) | Analyst `xiaomi/mimo-v2.6-flash` (screener) and tighten-only verifier `z-ai/glm-5.3-flash`. Selectors confirmed via `GET /api/v1/models`. |
-| Model routing and fallbacks | The demo names `tripwire-analyst` first. That policy is not created yet, so the client retries with the analyst model and labels the fallback. Create the policy in the dashboard to use Otari-native routing. |
+| Model routing and fallbacks | Live analyst chats use the `tripwire-analyst` Fallback policy (Xiaomi primary, GLM-5.3-Flash backup). The client still retries on the named analyst model if the policy request fails. On the latest live run, Otari served the primary (`Otari-Fallback: false`). |
 | MCP integrations | Books tools `list_vendors`, `get_vendor`, `list_open_bills` run in-process every run. `scripts/mcp_books_server.py` is a stdio server. Otari itself requires a Streamable-HTTP URL registered under Tools → MCP servers. |
-| Web search or web fetch | Documented tools are implemented, but this workspace currently returns `web_access_disabled`. Enable them under Tools, then rerun. |
+| Web search or web fetch | Live: one `POST /api/v1/fetch` of `https://ofac.treasury.gov/` on `deny_country` (billed at $0.01). Direct search still returns 400 until a search tool/provider is added on Tools & Guardrails. |
 | Code execution | Live: `POST /api/v1/code/execute` on the routine invoice (one call, billed at $0.01). |
-| Budgets and spending limits | The client reads `GET /api/v1/key/budget` and `/key/usage/summary`. No spend ceiling is attached to the key yet, so Otari does not refuse for budget. |
-| Per-user budgets | Two agent ids exist. A mismatched `user` field is a 403 on this key, so the client omits `user` unless `OTARI_USER` matches the key owner. Attach a second key / ceiling in Spend & budgets for the west-agent scenario. |
-| Guardrails | Request-level `guardrails` is supported, but this workspace has no guardrails service (`502` if a profile is sent). Mandate one in the dashboard, then rerun. |
+| Budgets and spending limits | The client reads `GET /api/v1/key/budget` and `/key/usage/summary`. The `tripwire-otari` key has a $1.00 monthly `api_token` ceiling, which the demo prints (limit, used, remaining, reset). It was not exhausted, so Otari did not refuse. |
+| Per-user budgets | Two agent ids exist. A mismatched `user` field is a 403 on this key, so the client omits `user` unless `OTARI_USER` matches the key owner. The $1.00 ceiling is on the single `tripwire-otari` key, not a west-agent key. |
+| Guardrails | Otari catalog guardrails were skipped: every option needs an outside vendor key. Tripwire's own policy gate is the guardrail layer. A request-level profile is not sent. |
 | Multiple models, distinct roles | Analyst proposes; verifier may only tighten. Confirmed live. |
 
 ## Run the sample demo
@@ -77,7 +78,7 @@ These map to the official rubric. In MOCK mode they are exercised against the do
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest -q          # 13 passed
+python -m pytest -q          # 14 passed
 python scripts/demo.py       # prints the decision table; writes docs/demo_run.txt
 uvicorn tripwire.app:app --port 8000
 ```
@@ -88,7 +89,7 @@ Open http://127.0.0.1:8000 for the dashboard. The header will say **MOCK MODE** 
 
 1. Create an account at [otari.ai](https://otari.ai/dashboard/#/signup) if you do not already have one.
 2. In the default workspace, create a workspace API key (it starts with `otk_` and is shown once). Optionally create a second key for `ap-agent-west`.
-3. Confirm model selectors on the Models page. Create a Fallback routing policy named `tripwire-analyst`. Attach budgets / ceilings (including a spent-down cap on the west key). Mandate a prompt-injection guardrail in block mode. Enable web search, web fetch, and code execution for the workspace. Optionally register `scripts/mcp_books_server.py` as an MCP server.
+3. Confirm model selectors on the Models page. A Fallback routing policy named `tripwire-analyst`, workspace web access, and a $1.00 monthly limit on the `tripwire-otari` key are already in place for this checkout. Optional leftovers: add a search tool/provider, a second/west key budget, a hosted MCP URL, or (only if you accept an outside vendor key) a catalog guardrail.
 4. Copy `.env.example` to `.env` and set `OTARI_API_KEY` (and `OTARI_API_KEY_WEST` if you created one). Do not paste tokens into chat or commit `.env`.
 5. `export $(grep -v '^#' .env | xargs)` then `OTARI_MODE=live python scripts/demo.py`.
 

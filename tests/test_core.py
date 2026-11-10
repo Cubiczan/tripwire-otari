@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 from tripwire.agent import Tripwire, load_pack, run_all
 from tripwire.audit import AuditLog
 from tripwire.books import Books
-from tripwire.otari import OtariClient, OtariResult, line_sum, redact
+from tripwire.otari import OtariClient, OtariResult, line_sum, parse_budget_payload, redact
 from tripwire.policy import Decision, PaymentRequest, Policy, evaluate, tighten
 
 
@@ -221,3 +221,33 @@ def _mock_settings():
         "has_key": False,
         "has_key_west": False,
     }
+
+
+def test_parse_budget_payload_reads_limits_array():
+    snap = parse_budget_payload(
+        {
+            "budgets_enforced": True,
+            "remaining_usd": 1.0,
+            "limits": [
+                {
+                    "scope": "api_token",
+                    "resets_at": "2026-12-01T00:00:00Z",
+                    "limit_usd": 1.0,
+                    "used_usd": 0.000004,
+                    "remaining_usd": 0.999996,
+                }
+            ],
+        },
+        agent_id="ap-agent-east",
+        mock=False,
+        source="key/budget",
+    )
+    assert snap.limit_usd == 1.0
+    assert snap.spent_usd == 0.000004
+    assert snap.remaining_usd == 0.999996
+    assert snap.exhausted is False
+    assert snap.resets_at == "2026-12-01T00:00:00Z"
+    assert snap.limits[0]["scope"] == "api_token"
+    public = snap.to_public_dict()
+    assert public["limit_usd"] == 1.0
+    assert "api_key" not in public

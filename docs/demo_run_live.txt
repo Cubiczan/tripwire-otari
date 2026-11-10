@@ -2,7 +2,9 @@ Tripwire for Otari — sample-data demo
 Otari mode: LIVE
 Hosted endpoint: https://api.otari.ai/api/v1
 Workspace token is set and is not printed.
-Usage after this run: cost=$0.041994  requests=45  errors=7  tokens=10652 (prompt=7633, completion=3019)
+Usage after this run: cost=$0.072451  requests=60  errors=8  tokens=14056 (prompt=10324, completion=3732)
+Key budget (GET /key/budget): limit=$1.00  used=$0.030457  remaining=$0.969543  exhausted=False  source=key/budget  resets_at=2026-12-01T00:00:00Z (2026-11-30 19:00 EST America/New_York)
+  limits: [{"scope": "api_token", "limit_usd": 1.0, "used_usd": 0.030457, "remaining_usd": 0.969543, "resets_at": "2026-12-01T00:00:00Z"}]
 Analyst model:  xiaomi/mimo-v2.6-flash
 Verifier model: z-ai/glm-5.3-flash
 Routing policy: tripwire-analyst
@@ -10,21 +12,22 @@ Routing policy: tripwire-analyst
 Scenario                 Decision Expect   Match  Reasons
 ---------------------------------------------------------
 allow_routine            allow    allow    yes    ok
-  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=allow
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash requested=tripwire-analyst verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=allow
 hold_over_threshold      hold     hold     yes    over_hold_threshold, verifier_hold
-  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=hold
-deny_country             deny     deny     yes    unknown_vendor, payee_not_allowlisted, country_not_allowed
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash requested=tripwire-analyst verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=hold
+deny_country             deny     deny     yes    unknown_vendor, payee_not_allowlisted, country_not_allowed, ofac_program_corroborated
+  ofac_fetch: ok=True mentions_north_korea=True url=https://ofac.treasury.gov/
 deny_over_max            deny     deny     yes    no_open_bill, over_max_single, velocity_total
 line_total_mismatch      hold     hold     yes    bill_amount_mismatch, line_total_mismatch, analyst_hold, verifier_hold
-  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash requested=tripwire-analyst verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
 unknown_vendor           hold     hold     yes    unknown_vendor, payee_not_allowlisted, analyst_hold, verifier_hold
-  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash requested=tripwire-analyst verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=hold verifier_rec=hold
 budget_exhausted         hold     deny     soft   otari_west_budget_not_configured
-  note: No second key budget is attached, so Otari cannot refuse this agent for spend.
+  note: The tripwire-otari key has a $1.00 monthly ceiling that is not exhausted, and no second (west) key budget is attached.
 guardrail_block          hold     deny     soft   otari_guardrails_not_configured
-  note: No Otari guardrails service is configured on this workspace.
+  note: Otari catalog guardrails need an outside vendor key. Tripwire's own policy gate is the guardrail layer.
 fallback_routing         allow    allow    yes    ok
-  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash verifier=zai-org/GLM-5.3-Flash fallback=True analyst_rec=allow verifier_rec=allow
+  models: analyst=XiaomiMiMo/MiMo-V2.6-Flash requested=tripwire-analyst verifier=zai-org/GLM-5.3-Flash fallback=False analyst_rec=allow verifier_rec=allow
 
 Audit chain: OK (9 events)
 
@@ -32,59 +35,61 @@ Otari features exercised in this run:
   [yes] Open-weight analyst model
   [yes] Open-weight verifier model
   [yes] Multiple models, distinct roles
-  [yes] Model routing / fallback
-  [yes] App-level fallback (no Otari routing policy configured)
+  [yes] Otari routing policy (tripwire-analyst)
+  [ no] Otari-Fallback header (backup model served)
+  [ no] App-level fallback (client backstop)
   [yes] MCP books tools (in-process)
   [ no] Web search
-  [ no] Web fetch
+  [yes] Web fetch
   [yes] Code execution
   [yes] Budgets and spending limits
-  [yes] Per-user budgets
+  [ no] Per-user budgets
   [ no] Guardrails
 
 Honesty notes:
 - No payment rail is connected. ALLOW records intent; it does not move money.
 - Sample vendors, bills, and search hits are invented for the demo.
-- Live calls used the hosted gateway at api.otari.ai. Costs come from /key/usage/summary.
-- Web search and web fetch are workspace-disabled on this account.
-- Otari guardrails are not configured (no guardrails service / profiles).
-- Routing policies cannot be created with a workspace key; fallback_routing uses an app-level retry.
-- Per-user / second-key budgets are not attached; budget_exhausted cannot be refused by Otari yet.
+- Live calls used the hosted gateway at api.otari.ai. Costs come from /key/usage/summary and /key/budget.
+- Analyst chats used the tripwire-analyst Fallback policy (xiaomi/mimo-v2.6-flash primary, z-ai/glm-5.3-flash backup). The client still retries on the named analyst model if the policy request fails.
+- Web fetch was used once on deny_country against https://ofac.treasury.gov/ to corroborate the North Korea sanctions program. Page content was treated as untrusted evidence and did not change a policy allow to a deny on its own.
+- Direct POST /search still returns 400: no search tool/provider is configured on Tools & Guardrails, even though GET /tools lists otari_web_search as available. This run did not loop the model on search tools.
+- Otari catalog guardrails were skipped: every dashboard option needs an outside vendor key (Lakera, Azure Prompt Shields, Alinia, Patronus, watsonx, Bedrock, or OpenAI Moderation). Tripwire's own policy gate is the guardrail layer.
+- The tripwire-otari key has a $1.00 USD monthly limit (api_token scope). There is no second/west key budget, so budget_exhausted is still a documented soft gap.
 - MCP books tools ran in-process. No Otari MCP server URL is registered.
-- Code execution is billed by Otari and was used once on allow_routine to limit spend.
+- Code execution and web fetch are each billed by Otari; each was used once in this run to limit spend.
 
 Usage by model (from Otari, redacted):
 [
   {
     "key": "code_execution",
     "label": null,
-    "cost": 0.04,
+    "cost": 0.05,
     "tokens": 0,
-    "requests": 4,
+    "requests": 5,
+    "is_other": false
+  },
+  {
+    "key": "builtin_fetch",
+    "label": null,
+    "cost": 0.02,
+    "tokens": 0,
+    "requests": 3,
     "is_other": false
   },
   {
     "key": "zai-org/GLM-5.3-Flash",
     "label": null,
-    "cost": 0.001057,
-    "tokens": 4065,
-    "requests": 17,
+    "cost": 0.001393,
+    "tokens": 5478,
+    "requests": 22,
     "is_other": false
   },
   {
     "key": "XiaomiMiMo/MiMo-V2.6-Flash",
     "label": null,
-    "cost": 0.000937,
-    "tokens": 6587,
-    "requests": 17,
-    "is_other": false
-  },
-  {
-    "key": "xiaomi/mimo-v2.6-flash",
-    "label": null,
-    "cost": 0.0,
-    "tokens": 0,
-    "requests": 2,
+    "cost": 0.001058,
+    "tokens": 8578,
+    "requests": 23,
     "is_other": false
   },
   {
@@ -92,7 +97,7 @@ Usage by model (from Otari, redacted):
     "label": null,
     "cost": 0.0,
     "tokens": 0,
-    "requests": 1,
+    "requests": 2,
     "is_other": false
   },
   {
@@ -104,11 +109,11 @@ Usage by model (from Otari, redacted):
     "is_other": false
   },
   {
-    "key": "builtin_fetch",
+    "key": "xiaomi/mimo-v2.6-flash",
     "label": null,
     "cost": 0.0,
     "tokens": 0,
-    "requests": 1,
+    "requests": 2,
     "is_other": false
   }
 ]
@@ -116,11 +121,11 @@ Usage by tool:
 [
   {
     "tool": "code_execution",
-    "calls": 4,
+    "calls": 5,
     "errors": 0,
-    "requests": 4,
-    "cost": 0.04
+    "requests": 5,
+    "cost": 0.05
   }
 ]
 
-Finished at 2026-11-10 09:43 EST
+Finished at 2026-11-10 09:53 EST

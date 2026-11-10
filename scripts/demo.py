@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -25,8 +26,9 @@ FEATURE_LABELS = [
     ("open_weight_analyst", "Open-weight analyst model"),
     ("open_weight_verifier", "Open-weight verifier model"),
     ("multiple_models", "Multiple models, distinct roles"),
-    ("routing_fallback", "Model routing / fallback"),
-    ("app_fallback", "App-level fallback (no Otari routing policy configured)"),
+    ("routing_policy", "Otari routing policy (tripwire-analyst)"),
+    ("routing_fallback", "Otari-Fallback header (backup model served)"),
+    ("app_fallback", "App-level fallback (client backstop)"),
     ("mcp", "MCP books tools (in-process)"),
     ("web_search", "Web search"),
     ("web_fetch", "Web fetch"),
@@ -38,9 +40,11 @@ FEATURE_LABELS = [
 
 # Live gaps that need dashboard setup; do not fail the demo script on these.
 LIVE_SOFT = {
-    "budget_exhausted": "No second key budget is attached, so Otari cannot refuse this agent for spend.",
-    "guardrail_block": "No Otari guardrails service is configured on this workspace.",
+    "budget_exhausted": "The tripwire-otari key has a $1.00 monthly ceiling that is not exhausted, and no second (west) key budget is attached.",
+    "guardrail_block": "Otari catalog guardrails need an outside vendor key. Tripwire's own policy gate is the guardrail layer.",
 }
+
+ET = ZoneInfo("America/New_York")
 
 
 def _scrub(text: str) -> str:
@@ -60,6 +64,34 @@ def _usage_line(summary: dict) -> str:
         f"errors={summary.get('error_count')}  "
         f"tokens={summary.get('total_tokens')} "
         f"(prompt={summary.get('prompt_tokens')}, completion={summary.get('completion_tokens')})"
+    )
+
+
+def _format_reset(resets_at: str) -> str:
+    if not resets_at:
+        return ""
+    try:
+        dt = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ET).strftime("%Y-%m-%d %H:%M %Z")
+    except ValueError:
+        return resets_at
+
+
+def _format_budget(snap) -> str:
+    if snap is None:
+        return "n/a"
+    reset_et = _format_reset(snap.resets_at or "")
+    reset_bit = ""
+    if snap.resets_at:
+        reset_bit = f"  resets_at={snap.resets_at}"
+        if reset_et:
+            reset_bit += f" ({reset_et} America/New_York)"
+    return (
+        f"limit=${snap.limit_usd:.2f}  used=${snap.spent_usd:.6f}  "
+        f"remaining=${snap.remaining_usd:.6f}  exhausted={snap.exhausted}  "
+        f"source={snap.source}{reset_bit}"
     )
 
 
@@ -83,6 +115,10 @@ def main() -> int:
         p(f"Hosted endpoint: {settings['base_url']}")
         p("Workspace token is set and is not printed.")
         p(f"Usage after this run: {_usage_line(usage_after)}")
+        budget_after = gate.client.budget("ap-agent-east")
+        p(f"Key budget (GET /key/budget): {_format_budget(budget_after)}")
+        if budget_after.limits:
+            p("  limits: " + json.dumps(budget_after.limits))
     p(f"Analyst model:  {settings['model_analyst']}")
     p(f"Verifier model: {settings['model_verifier']}")
     p(f"Routing policy: {settings['model_route']}")
@@ -112,13 +148,23 @@ def main() -> int:
         rec_v = (r.verifier or {}).get("parsed") or {}
         if r.analyst or r.verifier:
             p(
-                "  models: analyst={a} verifier={v} fallback={f} "
+                "  models: analyst={a} requested={req} verifier={v} fallback={f} "
                 "analyst_rec={ar} verifier_rec={vr}".format(
                     a=models.get("analyst"),
+                    req=models.get("analyst_requested") or "-",
                     v=models.get("verifier"),
                     f=models.get("fallback"),
                     ar=rec_a.get("recommendation") or (r.analyst or {}).get("error_type") or "-",
                     vr=rec_v.get("recommendation") or (r.verifier or {}).get("error_type") or "-",
+                )
+            )
+        fetch = (r.books or {}).get("otari_web_fetch")
+        if fetch:
+            p(
+                "  ofac_fetch: ok={ok} mentions_north_korea={nk} url={url}".format(
+                    ok=fetch.get("ok"),
+                    nk=fetch.get("mentions_north_korea"),
+                    url=fetch.get("url"),
                 )
             )
         used.update(r.features)
@@ -137,13 +183,14 @@ def main() -> int:
         p("- MOCK mode implements the documented Otari request shapes locally.")
         p("  Prize eligibility requires a live Otari.ai run and a public repo.")
     else:
-        p("- Live calls used the hosted gateway at api.otari.ai. Costs come from /key/usage/summary.")
-        p("- Web search and web fetch are workspace-disabled on this account.")
-        p("- Otari guardrails are not configured (no guardrails service / profiles).")
-        p("- Routing policies cannot be created with a workspace key; fallback_routing uses an app-level retry.")
-        p("- Per-user / second-key budgets are not attached; budget_exhausted cannot be refused by Otari yet.")
+        p("- Live calls used the hosted gateway at api.otari.ai. Costs come from /key/usage/summary and /key/budget.")
+        p("- Analyst chats used the tripwire-analyst Fallback policy (xiaomi/mimo-v2.6-flash primary, z-ai/glm-5.3-flash backup). The client still retries on the named analyst model if the policy request fails.")
+        p("- Web fetch was used once on deny_country against https://ofac.treasury.gov/ to corroborate the North Korea sanctions program. Page content was treated as untrusted evidence and did not change a policy allow to a deny on its own.")
+        p("- Direct POST /search still returns 400: no search tool/provider is configured on Tools & Guardrails, even though GET /tools lists otari_web_search as available. This run did not loop the model on search tools.")
+        p("- Otari catalog guardrails were skipped: every dashboard option needs an outside vendor key (Lakera, Azure Prompt Shields, Alinia, Patronus, watsonx, Bedrock, or OpenAI Moderation). Tripwire's own policy gate is the guardrail layer.")
+        p("- The tripwire-otari key has a $1.00 USD monthly limit (api_token scope). There is no second/west key budget, so budget_exhausted is still a documented soft gap.")
         p("- MCP books tools ran in-process. No Otari MCP server URL is registered.")
-        p("- Code execution is billed by Otari and was used once on allow_routine to limit spend.")
+        p("- Code execution and web fetch are each billed by Otari; each was used once in this run to limit spend.")
     if usage_after and not usage_after.get("mock"):
         p("")
         p("Usage by model (from Otari, redacted):")

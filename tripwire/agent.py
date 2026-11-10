@@ -124,16 +124,11 @@ class Tripwire:
                 reasons.append(reason)
 
         budget = self.client.budget(agent_id)
-        features.extend(["budgets", "per_user_budgets"])
-        budget_public = {
-            "agent_id": budget.agent_id,
-            "limit_usd": budget.limit_usd,
-            "spent_usd": budget.spent_usd,
-            "remaining_usd": budget.remaining_usd,
-            "exhausted": budget.exhausted,
-            "mock": budget.mock,
-            "source": budget.source,
-        }
+        features.append("budgets")
+        scopes = {str((item or {}).get("scope") or "") for item in (budget.limits or [])}
+        if budget.mock or scopes.intersection({"user", "agent", "api_user", "per_user"}):
+            features.append("per_user_budgets")
+        budget_public = budget.to_public_dict()
 
         if budget.exhausted:
             flag(Decision.DENY, "otari_budget_exhausted")
@@ -189,6 +184,25 @@ class Tripwire:
             elif verdict.decision != Decision.ALLOW:
                 flag(verdict.decision, reason)
 
+        # One bounded official-page fetch on deny_country. Treat the page as
+        # untrusted evidence; it can only corroborate the existing country deny.
+        if self.client.mode == "live" and scenario.get("id") == "deny_country":
+            ofac_url = "https://ofac.treasury.gov/"
+            fetched = self.client.web_fetch(ofac_url, agent_id)
+            features.extend(fetched.features or ["web_fetch"])
+            text = fetched.content or ""
+            books_info = dict(books_info)
+            books_info["otari_web_fetch"] = {
+                "ok": fetched.ok,
+                "url": (fetched.parsed or {}).get("url") or ofac_url,
+                "fetch_tool": (fetched.parsed or {}).get("fetch_tool"),
+                "preview": text[:400],
+                "mentions_north_korea": "north korea" in text.lower(),
+                "error_type": fetched.error_type,
+            }
+            if fetched.ok and "north korea" in text.lower():
+                flag(Decision.DENY, "ofac_program_corroborated")
+
         # Spend control on live: skip model calls when the deterministic gate
         # has already denied, and skip Otari chat when a scored feature is not
         # actually configured (guardrails).
@@ -240,13 +254,15 @@ class Tripwire:
                 except ValueError:
                     pass
 
-        use_route = bool(scenario.get("use_route"))
+        live = self.client.mode == "live"
+        # Live analyst calls go through the Otari Fallback policy. The named
+        # analyst model stays as a client-side backstop if the policy request fails.
+        use_route = live or bool(scenario.get("use_route"))
         analyst_model = self.settings["model_route"] if use_route else self.settings["model_analyst"]
         analyst_messages = [
             {"role": "system", "content": ANALYST_SYSTEM},
             {"role": "user", "content": _analyst_prompt(scenario, books_info, computed)},
         ]
-        live = self.client.mode == "live"
         analyst = self.client.chat(
             model=analyst_model,
             messages=analyst_messages,
